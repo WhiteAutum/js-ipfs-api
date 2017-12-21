@@ -5,10 +5,14 @@ const chai = require('chai')
 const dirtyChai = require('dirty-chai')
 const expect = chai.expect
 chai.use(dirtyChai)
+
+const parallel = require('async/parallel')
 const isNode = require('detect-node')
 const series = require('async/series')
 const loadFixture = require('aegir/fixtures')
-const FactoryClient = require('./ipfs-factory/client')
+
+const DaemonFactory = require('ipfsd-ctl')
+const df = DaemonFactory.create()
 
 const testfile = isNode
   ? loadFixture(__dirname, '/fixtures/testfile.txt')
@@ -17,38 +21,41 @@ const testfile = isNode
 describe('.name', function () {
   this.timeout(50 * 1000)
 
-  let ipfs
+  let ipfsd
   let other
-  let fc
 
   before((done) => {
-    fc = new FactoryClient()
     series([
       (cb) => {
-        fc.spawnNode((err, node) => {
+        df.spawn((err, node) => {
           expect(err).to.not.exist()
-          ipfs = node
+          ipfsd = node
           cb()
         })
       },
       (cb) => {
-        fc.spawnNode((err, node) => {
+        df.spawn((err, node) => {
           expect(err).to.not.exist()
           other = node
           cb()
         })
       },
       (cb) => {
-        ipfs.id((err, id) => {
+        ipfsd.api.id((err, id) => {
           expect(err).to.not.exist()
           const ma = id.addresses[0]
-          other.swarm.connect(ma, cb)
+          other.api.swarm.connect(ma, cb)
         })
       }
     ], done)
   })
 
-  after((done) => fc.dismantle(done))
+  after((done) => {
+    parallel([
+      (cb) => ipfsd.stop(cb),
+      (cb) => other.stop(cb)
+    ], done)
+  })
 
   describe('Callback API', () => {
     let name
@@ -56,7 +63,7 @@ describe('.name', function () {
     it('add file for testing', (done) => {
       const expectedMultihash = 'Qma4hjFTnCasJ8PVp3mZbZK5g2vGDT4LByLJ7m8ciyRFZP'
 
-      ipfs.files.add(testfile, (err, res) => {
+      ipfsd.api.files.add(testfile, (err, res) => {
         expect(err).to.not.exist()
 
         expect(res).to.have.length(1)
@@ -67,7 +74,7 @@ describe('.name', function () {
     })
 
     it('.name.publish', (done) => {
-      ipfs.name.publish('Qma4hjFTnCasJ8PVp3mZbZK5g2vGDT4LByLJ7m8ciyRFZP', (err, res) => {
+      ipfsd.api.name.publish('Qma4hjFTnCasJ8PVp3mZbZK5g2vGDT4LByLJ7m8ciyRFZP', (err, res) => {
         expect(err).to.not.exist()
         name = res
         expect(name).to.exist()
@@ -76,7 +83,7 @@ describe('.name', function () {
     })
 
     it('.name.resolve', (done) => {
-      ipfs.name.resolve(name.Name, (err, res) => {
+      ipfsd.api.name.resolve(name.Name, (err, res) => {
         expect(err).to.not.exist()
         expect(res).to.exist()
         expect(res).to.be.eql({
@@ -91,7 +98,7 @@ describe('.name', function () {
     let name
 
     it('.name.publish', () => {
-      return ipfs.name.publish('Qma4hjFTnCasJ8PVp3mZbZK5g2vGDT4LByLJ7m8ciyRFZP')
+      return ipfsd.api.name.publish('Qma4hjFTnCasJ8PVp3mZbZK5g2vGDT4LByLJ7m8ciyRFZP')
         .then((res) => {
           name = res
           expect(name).to.exist()
@@ -99,7 +106,7 @@ describe('.name', function () {
     })
 
     it('.name.resolve', () => {
-      return ipfs.name.resolve(name.Name)
+      return ipfsd.api.name.resolve(name.Name)
         .then((res) => {
           expect(res).to.exist()
           expect(res).to.be.eql({
